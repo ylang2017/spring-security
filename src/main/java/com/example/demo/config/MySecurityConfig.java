@@ -2,49 +2,65 @@ package com.example.demo.config;
 
 import com.example.demo.filter.MyJWTCheckFilter;
 import com.example.demo.filter.MyJWTLoginFilter;
-import org.springframework.context.annotation.Bean;
+import com.example.demo.provider.MyAuthenticationProvider;
+import com.example.demo.service.MyUserDetailsService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.config.http.SessionCreationPolicy;
 
-/**
- * 简单起见，这里我并未对密码进行加密，因此配置了NoOpPasswordEncoder的实例。
- * 简单起见，这里并未连接数据库，我直接在内存中配置了两个用户，两个用户具备不同的角色。
- * 配置路径规则时， /hello 接口必须要具备 user 角色才能访问，
- *  /admin 接口必须要具备 admin 角色才能访问，POST 请求并且是 /login 接口则可以直接通过，其他接口必须认证后才能访问。
- * 最后配置上两个自定义的过滤器并且关闭掉csrf保护。
- */
 @Configuration
 public class MySecurityConfig extends WebSecurityConfigurerAdapter {
-    @Bean
-    PasswordEncoder passwordEncoder() {
-        return NoOpPasswordEncoder.getInstance();
-    }
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.inMemoryAuthentication().withUser("admin")
-                .password("123").roles("admin")
-                .and()
-                .withUser("sang")
-                .password("456")
-                .roles("user");
-    }
+    @Autowired
+    private MyAuthenticationProvider provider;
+
+    @Autowired
+    private MyUserDetailsService myUserDetailsService;
+
+    @Autowired
+    private MyPasswordEncoder myPasswordEncoder;
 
     @Override
     protected void configure(HttpSecurity http) throws Exception {
-        http.authorizeRequests()
-                .antMatchers("/hello").hasRole("user")
-                .antMatchers("/admin").hasRole("admin")
-                .antMatchers(HttpMethod.POST, "/login").permitAll()
-                .anyRequest().authenticated()
-                .and()
-                .addFilterBefore(new MyJWTLoginFilter(authenticationManager()), UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(new MyJWTCheckFilter(authenticationManager()),UsernamePasswordAuthenticationFilter.class)
-                .csrf().disable();
+        http
+            //关闭跨站请求防护
+            .cors().and().csrf().disable()
+
+            //登陆设置
+            .formLogin()//参数必须以表单的方式传递
+                .loginPage("/login.html")//用户未登录时，访问任何资源都转跳到该路径，即登录页面
+                .loginProcessingUrl("/loginAction")//登录表单form中action的地址，也就是处理认证请求的路径
+                //.usernameParameter("username")///登录表单form中用户名输入框input的name名，不修改的话默认是username
+                //.passwordParameter("password")//form中密码输入框input的name名，不修改的话默认是password
+                .defaultSuccessUrl("/index.html")//登录认证成功后默认转跳的路径
+
+            .and()
+            //访问权限
+            .authorizeRequests()
+            //不需要通过登录验证就可以被访问的资源路径
+            .antMatchers("/test","/login.html","/index.html","/loginAction").permitAll()
+            //需要角色权限访问
+            .antMatchers("/admin").hasAnyAuthority("ROLE_ADMIN")  //前面是资源的访问路径、后面是资源的名称或者叫资源ID
+            .antMatchers("/user").hasAnyAuthority("ROLE_USER")  //前面是资源的访问路径、后面是资源的名称或者叫资源ID
+            //其他的需要授权后访问
+            .anyRequest().authenticated()
+
+            .and()
+            //增加登陆验证
+            .addFilter(new MyJWTLoginFilter(authenticationManager()))
+            //增加登陆过滤
+            .addFilter(new MyJWTCheckFilter(authenticationManager()))
+            //前后端分离是无状态的，所以不用session，將登陆信息保存在token中。
+            .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
+    }
+
+    @Override
+    public void configure(AuthenticationManagerBuilder auth) throws Exception {
+        //覆盖UserDetailsService类,自定义用户信息来源,自定义密码加密方式
+        auth.userDetailsService(myUserDetailsService).passwordEncoder(myPasswordEncoder);
+        //自定义用户信息验证规则
+        auth.authenticationProvider(provider);
     }
 }

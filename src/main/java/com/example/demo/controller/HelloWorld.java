@@ -20,6 +20,12 @@ public class HelloWorld {
         return "hello admin";
     }
 
+    @RequestMapping("/user")
+    @ResponseBody
+    public String user(){
+        return "hello user";
+    }
+
     @RequestMapping(value = "/login",method = RequestMethod.POST)
     @ResponseBody
     public String login(String username,String password){

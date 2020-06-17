@@ -4,20 +4,16 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
-import org.springframework.web.filter.GenericFilterBean;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.List;
+import java.util.*;
 
 /**
  * 这个过滤器用于获取用户请求中携带的jwt信息
@@ -31,19 +27,43 @@ public class MyJWTCheckFilter extends BasicAuthenticationFilter {
         super(authenticationManager);
     }
 
+    /**
+     * 在拦截器中获取token并解析，拿到用户信息，放置到SecurityContextHolder，这样便完成了spring security和jwt的整合。
+     */
     @Override
-    public void doFilterInternal(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            FilterChain chain) throws IOException, ServletException {
-        String jwtToken = response.getHeader("authorization");
-        System.out.println(jwtToken);
-        Claims claims = Jwts.parser().setSigningKey("sang@123").parseClaimsJws(jwtToken.replace("Bearer", ""))
-                .getBody();
-        String username = claims.getSubject();//获取当前登录用户名
-        List<GrantedAuthority> authorities = AuthorityUtils.commaSeparatedStringToAuthorityList((String) claims.get("authorities"));
-        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(username, null, authorities);
-        SecurityContextHolder.getContext().setAuthentication(token);
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        System.out.println("用户请求："+request.getRequestURL());
+        System.out.println("触发token验证，即将获取请求token,判断请求是否已授权。");
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            chain.doFilter(request, response);
+            return;
+        }
+        // 将Authentication写入SecurityContextHolder中供后续使用
+        UsernamePasswordAuthenticationToken authentication = getAuthentication(request);
+        System.out.println("已获取token,将token放入SecurityContextHolder中供后续使用");
+        SecurityContextHolder.getContext().setAuthentication(authentication);
         chain.doFilter(request, response);
+    }
+
+    private UsernamePasswordAuthenticationToken getAuthentication(HttpServletRequest request) {
+        String token = request.getHeader("Authorization");
+
+        Claims claims = Jwts
+                .parser()
+                .setSigningKey("MyJwtSecret")
+                .parseClaimsJws(token.replace("Bearer ", ""))
+                .getBody();
+        String user = claims.getSubject();
+
+        Collection<Map<String,String>> roles = claims.get("ROLE", Collection.class);
+        List<SimpleGrantedAuthority> auths = new ArrayList<>();
+        roles.forEach((authMap) -> auths.add(new SimpleGrantedAuthority(authMap.get("authority"))));
+
+        if (user != null) {
+            return new UsernamePasswordAuthenticationToken(user, null, auths);
+        }
+        return null;
     }
 }
